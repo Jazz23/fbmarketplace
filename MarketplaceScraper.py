@@ -410,7 +410,11 @@ def getListingDetails(listingID):
         data["description"] = desc_text.replace('\\n', '\n').strip() if desc_text else "No description provided."
         data["title"] = target.get("marketplace_listing_title")
         data["creation_time"] = target.get("creation_time")
-        data["location_text"] = safe_get(target, "location_text", "text")
+        data["location"] = {
+            "text": safe_get(target, "location_text", "text"),
+            "latitude": safe_get(target, "location", "latitude"),
+            "longitude": safe_get(target, "location", "longitude"),
+        }
         data["is_live"] = target.get("is_live")
         data["is_pending"] = target.get("is_pending")
         data["is_sold"] = target.get("is_sold")

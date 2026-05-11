@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -50,6 +51,48 @@ def test_search_delegates_to_scraper(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["data"]["listingPages"] == []
+
+
+def test_get_listing_details_returns_location_object(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    listing_id = "12345"
+    payload = {
+        "data": {
+            "viewer": {
+                "marketplace_product_details_page": {
+                    "target": {
+                        "marketplace_listing_title": "Chair",
+                        "creation_time": 123,
+                        "location_text": {"text": "Austin, TX"},
+                        "location": {"latitude": 30.2672, "longitude": -97.7431},
+                        "redacted_description": {"text": "Nice chair"},
+                        "attribute_data": [],
+                    }
+                }
+            }
+        }
+    }
+
+    class FakeResponse:
+        text = json.dumps(payload)
+
+    monkeypatch.setattr(
+        MarketplaceScraper,
+        "getFacebookResponse",
+        lambda *args, **kwargs: ("Success", {}, FakeResponse()),
+    )
+
+    status, error, data = MarketplaceScraper.getListingDetails(listing_id)
+
+    assert status == "Success"
+    assert error == {}
+    assert data["location"] == {
+        "text": "Austin, TX",
+        "latitude": 30.2672,
+        "longitude": -97.7431,
+    }
+    assert "location_text" not in data
 
 
 def test_configure_proxy_session_from_env(monkeypatch):
