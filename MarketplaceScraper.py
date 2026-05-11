@@ -1,8 +1,12 @@
-import requests
+from __future__ import annotations
+
 import json
 import copy
 import os
 import time
+from typing import Any
+
+import requests
 
 GRAPHQL_URL = "https://www.facebook.com/api/graphql/"
 GRAPHQL_HEADERS = {
@@ -15,15 +19,17 @@ GRAPHQL_HEADERS = {
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
 }
-PROXY_CONFIG = {}
+GRAPHQL_TIMEOUT = (3.05, 30)
 
 SCRAPER_SESSION = requests.Session()
+SCRAPER_SESSION.headers.update(GRAPHQL_HEADERS)
+SCRAPER_SESSION.trust_env = True
 
-def update_session_proxy(proxies):
-    SCRAPER_SESSION.proxies = proxies
+def update_session_proxy(proxies: dict[str, str] | None):
+    SCRAPER_SESSION.proxies = proxies or {}
     SCRAPER_SESSION.cookies.clear()
 
-def safe_get(obj, *keys, default=None):
+def safe_get(obj: Any, *keys: str, default: Any = None):
     try:
         for key in keys:
             if obj is None:
@@ -37,7 +43,13 @@ def getLocations(locationQuery):
     data = {}
 
     requestPayload = {
-        "variables": """{"params": {"caller": "MARKETPLACE", "page_category": ["CITY", "SUBCITY", "NEIGHBORHOOD","POSTAL_CODE"], "query": "%s"}}""" % (locationQuery),
+        "variables": json.dumps({
+            "params": {
+                "caller": "MARKETPLACE",
+                "page_category": ["CITY", "SUBCITY", "NEIGHBORHOOD", "POSTAL_CODE"],
+                "query": locationQuery,
+            }
+        }),
         "doc_id": "5585904654783609"
     }
 
@@ -79,10 +91,10 @@ def getListings(locationLatitude, locationLongitude, listingQuery, numPageResult
     rawPageResults = []
     
     try: lower_bound = int(minPrice) * 100
-    except: lower_bound = 0
+    except (TypeError, ValueError): lower_bound = 0
     
     try: upper_bound = int(maxPrice) * 100
-    except: upper_bound = 214748364700
+    except (TypeError, ValueError): upper_bound = 214748364700
 
     variables_dict = {
         "count": 24,
@@ -308,10 +320,9 @@ def getListingImages(listingID):
 def getFacebookResponse(requestPayload):
     try:
         facebookResponse = SCRAPER_SESSION.post(
-            GRAPHQL_URL, 
-            headers=GRAPHQL_HEADERS, 
-            data=requestPayload, 
-            timeout=20
+            GRAPHQL_URL,
+            data=requestPayload,
+            timeout=GRAPHQL_TIMEOUT,
         )
 
         try:
@@ -319,7 +330,7 @@ def getFacebookResponse(requestPayload):
             if res_json.get("errors"):
                 error_msg = res_json["errors"][0].get("message", "Unknown API Error")
                 return ("Failure", {"source": "Facebook", "message": error_msg}, facebookResponse)
-        except:
+        except Exception:
             pass
 
         return ("Success", {}, facebookResponse)
