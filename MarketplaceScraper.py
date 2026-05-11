@@ -4,6 +4,7 @@ import json
 import copy
 import os
 import time
+from itertools import cycle
 from typing import Any
 
 import requests
@@ -25,8 +26,126 @@ SCRAPER_SESSION = requests.Session()
 SCRAPER_SESSION.headers.update(GRAPHQL_HEADERS)
 SCRAPER_SESSION.trust_env = True
 
-def update_session_proxy(proxies: dict[str, str] | None):
-    SCRAPER_SESSION.proxies = proxies or {}
+_PROXY_POOL: list[dict[str, str]] = []
+_PROXY_CYCLE = cycle(())
+
+
+def _env_flag(name: str, default: str = "true") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_proxy_url(proxy_url: str) -> str:
+    proxy_url = proxy_url.strip()
+    if not proxy_url:
+        return ""
+    if "://" not in proxy_url:
+        proxy_url = f"http://{proxy_url}"
+    return proxy_url
+
+
+def _parse_proxy_list(proxy_list_text: str) -> list[dict[str, str]]:
+    proxies: list[dict[str, str]] = []
+
+    for raw_line in proxy_list_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        proxy_url = _normalize_proxy_url(line)
+        if proxy_url:
+            proxies.append({"http": proxy_url, "https": proxy_url})
+
+    return proxies
+
+
+def _normalize_proxy_mapping(proxy: dict[str, str]) -> dict[str, str]:
+    http_proxy = _normalize_proxy_url(str(proxy.get("http", "")))
+    https_proxy = _normalize_proxy_url(str(proxy.get("https", http_proxy)))
+
+    if not http_proxy and not https_proxy:
+        return {}
+
+    if not http_proxy:
+        http_proxy = https_proxy
+    if not https_proxy:
+        https_proxy = http_proxy
+
+    return {"http": http_proxy, "https": https_proxy}
+
+
+def _normalize_proxy_entry(proxy: Any) -> dict[str, str]:
+    if isinstance(proxy, str):
+        proxy_url = _normalize_proxy_url(proxy)
+        return {"http": proxy_url, "https": proxy_url} if proxy_url else {}
+
+    if isinstance(proxy, dict):
+        return _normalize_proxy_mapping(proxy)
+
+    return {}
+
+
+def _set_proxy_pool(proxies: list[dict[str, str]]) -> None:
+    global _PROXY_POOL, _PROXY_CYCLE
+
+    _PROXY_POOL = proxies
+    _PROXY_CYCLE = cycle(_PROXY_POOL) if _PROXY_POOL else cycle(())
+
+
+def _sync_session_proxy() -> None:
+    SCRAPER_SESSION.proxies = _PROXY_POOL[0] if _PROXY_POOL else {}
+
+
+def configure_proxy_session_from_env() -> None:
+    proxy_list_url = os.getenv("PROXY_LIST_URL", "").strip()
+    require_proxies = _env_flag("REQUIRE_PROXIES")
+
+    if not proxy_list_url:
+        _set_proxy_pool([])
+        _sync_session_proxy()
+
+        if require_proxies:
+            raise RuntimeError("REQUIRE_PROXIES is true but PROXY_LIST_URL is not set")
+
+        return
+
+    response = requests.get(proxy_list_url, timeout=GRAPHQL_TIMEOUT)
+    response.raise_for_status()
+
+    proxies = _parse_proxy_list(response.text)
+    if not proxies:
+        _set_proxy_pool([])
+        _sync_session_proxy()
+
+        if require_proxies:
+            raise RuntimeError("PROXY_LIST_URL returned no usable proxies")
+
+        return
+
+    _set_proxy_pool(proxies)
+    _sync_session_proxy()
+
+
+def _apply_next_proxy() -> None:
+    if _PROXY_POOL:
+        SCRAPER_SESSION.proxies = next(_PROXY_CYCLE)
+    else:
+        SCRAPER_SESSION.proxies = {}
+
+def update_session_proxy(proxies: dict[str, str] | list[dict[str, str]] | list[str] | str | None):
+    if proxies is None:
+        _set_proxy_pool([])
+        SCRAPER_SESSION.proxies = {}
+        SCRAPER_SESSION.cookies.clear()
+        return
+
+    if isinstance(proxies, (str, dict)):
+        proxy_pool = [_normalize_proxy_entry(proxies)]
+    else:
+        proxy_pool = [_normalize_proxy_entry(proxy) for proxy in proxies]
+
+    proxy_pool = [proxy for proxy in proxy_pool if proxy]
+    _set_proxy_pool(proxy_pool)
+    _sync_session_proxy()
     SCRAPER_SESSION.cookies.clear()
 
 def safe_get(obj: Any, *keys: str, default: Any = None):
@@ -319,6 +438,8 @@ def getListingImages(listingID):
 
 def getFacebookResponse(requestPayload):
     try:
+        _apply_next_proxy()
+
         facebookResponse = SCRAPER_SESSION.post(
             GRAPHQL_URL,
             data=requestPayload,

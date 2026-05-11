@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -49,3 +50,56 @@ def test_search_delegates_to_scraper(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["data"]["listingPages"] == []
+
+
+def test_configure_proxy_session_from_env(monkeypatch):
+    monkeypatch.setenv("PROXY_LIST_URL", "https://example.com/proxies.txt")
+    monkeypatch.setenv("REQUIRE_PROXIES", "true")
+
+    class FakeResponse:
+        status_code = 200
+        text = "127.0.0.1:8080\nhttps://user:pass@127.0.0.2:8081\n"
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(MarketplaceScraper.requests, "get", lambda *args, **kwargs: FakeResponse())
+
+    MarketplaceScraper.configure_proxy_session_from_env()
+
+    assert MarketplaceScraper.SCRAPER_SESSION.proxies["http"].startswith("http://")
+
+
+def test_update_session_proxy_cycles_through_pool():
+    first = {"http": "http://127.0.0.1:8080", "https": "http://127.0.0.1:8080"}
+    second = {"http": "http://127.0.0.2:8080", "https": "http://127.0.0.2:8080"}
+
+    MarketplaceScraper.update_session_proxy([first, second])
+
+    assert MarketplaceScraper.SCRAPER_SESSION.proxies == first
+
+    MarketplaceScraper._apply_next_proxy()
+    assert MarketplaceScraper.SCRAPER_SESSION.proxies == first
+
+    MarketplaceScraper._apply_next_proxy()
+    assert MarketplaceScraper.SCRAPER_SESSION.proxies == second
+
+    MarketplaceScraper._apply_next_proxy()
+    assert MarketplaceScraper.SCRAPER_SESSION.proxies == first
+
+
+def test_proxy_endpoint_accepts_proxy_list():
+    client = MarketplaceAPI.create_app().test_client()
+
+    response = client.post(
+        "/proxy",
+        json={
+            "proxies": [
+                {"http": "http://127.0.0.1:8080", "https": "http://127.0.0.1:8080"},
+                {"http": "http://127.0.0.2:8080", "https": "http://127.0.0.2:8080"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["proxies"][0]["http"] == "http://127.0.0.1:8080"

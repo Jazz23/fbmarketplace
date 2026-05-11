@@ -8,10 +8,19 @@ Flask API for scraping Facebook Marketplace data. The project is managed with `u
 uv sync
 ```
 
+Create a `.env` file with optional proxy settings:
+
+```bash
+PROXY_LIST_URL=https://proxy.webshare.io/api/v2/proxy/list/download/jxhlgmnyxjhvaaslldboxqxmjhzklvnihxqdftoy/-/any/username/direct/-/?plan_id=13343397
+REQUIRE_PROXIES=false
+```
+
+`REQUIRE_PROXIES` defaults to `true` when unset.
+
 ## Run
 
 ```bash
-uv run python MarketplaceAPI.py
+uv run MarketplaceAPI.py
 ```
 
 ## Health Check
@@ -35,7 +44,7 @@ Query params: `listingID`
 Query params: `listingID`
 
 ### `POST /proxy`
-Body: `proxy` or `proxies`
+Body: `proxy` or `proxies` (`proxies` can be an object, array, or string)
 
 ## Response Shape
 

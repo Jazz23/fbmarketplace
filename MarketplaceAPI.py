@@ -1,9 +1,30 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, Flask, jsonify, request
+
+def _load_dotenv(path: str = ".env") -> None:
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
 
 import MarketplaceScraper
 
@@ -116,10 +137,10 @@ def proxy():
     if proxies is None:
         return missing_param("Missing required parameter(s)")
 
-    if not isinstance(proxies, dict):
+    if not isinstance(proxies, (dict, list, str)):
         return build_response("Failure", {
             "source": "User",
-            "message": "proxies must be an object or proxy must be a string",
+            "message": "proxies must be an object, array, or proxy must be a string",
         }, {}, 400)
 
     MarketplaceScraper.update_session_proxy(proxies)
@@ -145,6 +166,8 @@ app = create_app()
 
 
 def main() -> None:
+    MarketplaceScraper.configure_proxy_session_from_env()
+
     app.run(
         host=os.getenv("HOST", "127.0.0.1"),
         port=int(os.getenv("PORT", "5000")),
