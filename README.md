@@ -150,3 +150,28 @@ Retrieves listings matching the provided query, coordinates, and filters.
 }
 ```
 *(Note: To fetch the next page, pass the `end_cursor` value into the `cursor` parameter on your next request).*
+
+#### 3. `/listing/details`
+Retrieves full listing metadata for a specific listing ID.
+
+**Method:** `GET`
+
+**Parameters:**
+* `listingID` (String, Required) - Marketplace listing ID.
+
+#### 4. `/listing/images`
+Retrieves image URLs for a specific listing ID.
+
+**Method:** `GET`
+
+**Parameters:**
+* `listingID` (String, Required) - Marketplace listing ID.
+
+#### 5. `/proxy`
+Updates the scraper session proxy configuration.
+
+**Method:** `POST`
+
+**Body:**
+* `proxy` (String, Optional) - A single proxy URL applied to both HTTP and HTTPS.
+* `proxies` (Object, Optional) - A proxy mapping such as `{ "http": "...", "https": "..." }`.

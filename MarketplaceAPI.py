@@ -4,33 +4,34 @@ import MarketplaceScraper
 API = Flask(__name__)
 
 
+def build_response(status, error, data):
+    return {
+        "status": status,
+        "error": error,
+        "data": data,
+    }
+
+
+def missing_param(message="Missing required parameter"):
+    return build_response("Failure", {
+        "source": "User",
+        "message": message,
+    }, {})
+
+
 @API.route("/locations", methods=["GET"])
 def locations():
-    response = {}
-
     locationQuery = request.args.get("locationQuery")
 
-    if (locationQuery):
-        status, error, data = MarketplaceScraper.getLocations(
-            locationQuery=locationQuery)
-    else:
-        status = "Failure"
-        error = {}
-        error["source"] = "User"
-        error["message"] = "Missing required parameter"
-        data = {}
+    if not locationQuery:
+        return missing_param()
 
-    response["status"] = status
-    response["error"] = error
-    response["data"] = data
-
-    return response
+    status, error, data = MarketplaceScraper.getLocations(locationQuery=locationQuery)
+    return build_response(status, error, data)
 
 
 @API.route("/search", methods=["GET"])
 def search():
-    response = {}
-
     locationLatitude = request.args.get("locationLatitude")
     locationLongitude = request.args.get("locationLongitude")
     listingQuery = request.args.get("listingQuery")
@@ -43,28 +44,64 @@ def search():
     except ValueError:
         numPageResults = 1
 
-    if (locationLatitude and locationLongitude and listingQuery):
-        status, error, data = MarketplaceScraper.getListings(
-            locationLatitude=locationLatitude, 
-            locationLongitude=locationLongitude, 
-            listingQuery=listingQuery,
-            numPageResults=numPageResults,
-            minPrice=minPrice,
-            maxPrice=maxPrice,
-            cursor=cursor
-        )
-    else:
-        status = "Failure"
-        error = {}
-        error["source"] = "User"
-        error["message"] = "Missing required parameter(s)"
-        data = {}
+    if not (locationLatitude and locationLongitude and listingQuery):
+        return missing_param("Missing required parameter(s)")
 
-    response["status"] = status
-    response["error"] = error
-    response["data"] = data
+    status, error, data = MarketplaceScraper.getListings(
+        locationLatitude=locationLatitude,
+        locationLongitude=locationLongitude,
+        listingQuery=listingQuery,
+        numPageResults=numPageResults,
+        minPrice=minPrice,
+        maxPrice=maxPrice,
+        cursor=cursor,
+    )
 
-    return response
+    return build_response(status, error, data)
+
+
+@API.route("/listing/details", methods=["GET"])
+def listing_details():
+    listingID = request.args.get("listingID")
+
+    if not listingID:
+        return missing_param()
+
+    status, error, data = MarketplaceScraper.getListingDetails(listingID)
+    return build_response(status, error, data)
+
+
+@API.route("/listing/images", methods=["GET"])
+def listing_images():
+    listingID = request.args.get("listingID")
+
+    if not listingID:
+        return missing_param()
+
+    status, error, data = MarketplaceScraper.getListingImages(listingID)
+    return build_response(status, error, data)
+
+
+@API.route("/proxy", methods=["POST"])
+def proxy():
+    payload = request.get_json(silent=True) or {}
+    proxy_url = payload.get("proxy") or request.args.get("proxy")
+    proxies = payload.get("proxies")
+
+    if proxy_url:
+        proxies = {"http": proxy_url, "https": proxy_url}
+
+    if proxies is None:
+        return missing_param("Missing required parameter(s)")
+
+    if not isinstance(proxies, dict):
+        return build_response("Failure", {
+            "source": "User",
+            "message": "proxies must be an object or proxy must be a string",
+        }, {})
+
+    MarketplaceScraper.update_session_proxy(proxies)
+    return build_response("Success", {}, {"proxies": proxies})
 
 if __name__ == "__main__":
     API.run(debug=True)

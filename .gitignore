@@ -10,3 +10,7 @@ venv/
 
 # Development Files
 test.py
+
+cache/
+
+__pycache__/
