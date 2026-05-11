@@ -5,6 +5,7 @@ import copy
 import os
 import time
 from itertools import cycle
+from urllib.parse import urlparse
 from typing import Any
 
 import requests
@@ -38,6 +39,13 @@ def _normalize_proxy_url(proxy_url: str) -> str:
     proxy_url = proxy_url.strip()
     if not proxy_url:
         return ""
+
+    if "://" not in proxy_url and "@" not in proxy_url:
+        parts = proxy_url.split(":", 3)
+        if len(parts) == 4 and parts[1].isdigit():
+            host, port, username, password = parts
+            return f"http://{username}:{password}@{host}:{port}"
+
     if "://" not in proxy_url:
         proxy_url = f"http://{proxy_url}"
     return proxy_url
@@ -131,6 +139,25 @@ def _apply_next_proxy() -> None:
     else:
         SCRAPER_SESSION.proxies = {}
 
+
+def _current_proxy_info() -> dict[str, str]:
+    proxy_url = SCRAPER_SESSION.proxies.get("http") or SCRAPER_SESSION.proxies.get("https") or ""
+    parsed = urlparse(proxy_url)
+
+    if not parsed.hostname:
+        if not proxy_url:
+            return {"proxy": ""}
+        return {"proxy": proxy_url}
+
+    proxy = parsed.hostname
+    try:
+        if parsed.port:
+            proxy = f"{proxy}:{parsed.port}"
+    except ValueError:
+        pass
+
+    return {"proxy": proxy}
+
 def update_session_proxy(proxies: dict[str, str] | list[dict[str, str]] | list[str] | str | None):
     if proxies is None:
         _set_proxy_pool([])
@@ -147,6 +174,19 @@ def update_session_proxy(proxies: dict[str, str] | list[dict[str, str]] | list[s
     _set_proxy_pool(proxy_pool)
     _sync_session_proxy()
     SCRAPER_SESSION.cookies.clear()
+
+
+def test_current_proxy() -> tuple[str, dict[str, str], dict[str, str]]:
+    proxy_info = _current_proxy_info()
+
+    try:
+        response = SCRAPER_SESSION.get("https://ifconfig.me/ip", timeout=GRAPHQL_TIMEOUT)
+        response.raise_for_status()
+        observed_ip = response.text.strip()
+    except Exception as e:
+        return ("Failure", {"source": "Request", "message": str(e)}, proxy_info)
+
+    return ("Success", {}, {**proxy_info, "internet_ip": observed_ip})
 
 def safe_get(obj: Any, *keys: str, default: Any = None):
     try:

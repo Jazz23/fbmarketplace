@@ -58,7 +58,7 @@ def test_configure_proxy_session_from_env(monkeypatch):
 
     class FakeResponse:
         status_code = 200
-        text = "127.0.0.1:8080\nhttps://user:pass@127.0.0.2:8081\n"
+        text = "127.0.0.1:8080:user:pass\nhttps://user:pass@127.0.0.2:8081\n"
 
         def raise_for_status(self):
             return None
@@ -68,6 +68,7 @@ def test_configure_proxy_session_from_env(monkeypatch):
     MarketplaceScraper.configure_proxy_session_from_env()
 
     assert MarketplaceScraper.SCRAPER_SESSION.proxies["http"].startswith("http://")
+    assert "@" in MarketplaceScraper.SCRAPER_SESSION.proxies["http"]
 
 
 def test_update_session_proxy_cycles_through_pool():
@@ -103,3 +104,22 @@ def test_proxy_endpoint_accepts_proxy_list():
 
     assert response.status_code == 200
     assert response.get_json()["data"]["proxies"][0]["http"] == "http://127.0.0.1:8080"
+
+
+def test_proxy_test_endpoint_reports_proxy_and_ip(monkeypatch):
+    client = MarketplaceAPI.create_app().test_client()
+
+    MarketplaceScraper.update_session_proxy({"http": "http://127.0.0.1:8080", "https": "http://127.0.0.1:8080"})
+
+    class FakeResponse:
+        text = "203.0.113.9\n"
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(MarketplaceScraper.SCRAPER_SESSION, "get", lambda *args, **kwargs: FakeResponse())
+
+    response = client.get("/proxy/test")
+
+    assert response.status_code == 200
+    assert response.get_json()["data"] == {"proxy": "127.0.0.1:8080", "internet_ip": "203.0.113.9"}

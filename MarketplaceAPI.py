@@ -147,6 +147,12 @@ def proxy():
     return build_response("Success", {}, {"proxies": proxies})
 
 
+@api.get("/proxy/test")
+def proxy_test():
+    status, error, data = MarketplaceScraper.test_current_proxy()
+    return build_response(status, error, data, _http_status(status, error))
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     app.register_blueprint(api)
