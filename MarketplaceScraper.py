@@ -266,6 +266,7 @@ def getListings(locationLatitude, locationLongitude, listingQuery, numPageResult
                 "commerce_enable_local_pickup": True,
                 "commerce_enable_shipping": True,
                 "commerce_search_and_rp_available": True,
+                "commerce_search_sort_by": "CREATION_TIME_DESCEND",
                 "filter_location_latitude": float(locationLatitude),
                 "filter_location_longitude": float(locationLongitude),
                 "filter_price_lower_bound": lower_bound,
