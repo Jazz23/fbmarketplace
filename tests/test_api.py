@@ -166,3 +166,74 @@ def test_proxy_test_endpoint_reports_proxy_and_ip(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["data"] == {"proxy": "127.0.0.1:8080", "internet_ip": "203.0.113.9"}
+
+
+def test_get_facebook_response_retries_rate_limits_with_next_proxy(monkeypatch):
+    first = {"http": "http://127.0.0.1:8080", "https": "http://127.0.0.1:8080"}
+    second = {"http": "http://127.0.0.2:8080", "https": "http://127.0.0.2:8080"}
+    MarketplaceScraper.update_session_proxy([first, second])
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    seen_proxies = []
+    responses = iter([
+        FakeResponse(429, {}),
+        FakeResponse(200, {"data": {"ok": True}}),
+    ])
+
+    def fake_post(*args, **kwargs):
+        seen_proxies.append(dict(MarketplaceScraper.SCRAPER_SESSION.proxies))
+        return next(responses)
+
+    monkeypatch.setattr(MarketplaceScraper.SCRAPER_SESSION, "post", fake_post)
+    monkeypatch.setattr(MarketplaceScraper.time, "sleep", lambda *_args, **_kwargs: None)
+
+    status, error, response = MarketplaceScraper.getFacebookResponse({"doc_id": "1"})
+
+    assert status == "Success"
+    assert error == {}
+    assert response is not None
+    assert response.status_code == 200
+    assert seen_proxies == [first, second]
+
+
+def test_get_facebook_response_retries_graphql_rate_limit(monkeypatch):
+    first = {"http": "http://127.0.0.1:8080", "https": "http://127.0.0.1:8080"}
+    second = {"http": "http://127.0.0.2:8080", "https": "http://127.0.0.2:8080"}
+    MarketplaceScraper.update_session_proxy([first, second])
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    seen_proxies = []
+    responses = iter([
+        FakeResponse({"errors": [{"message": "Rate limit exceeded"}]}),
+        FakeResponse({"data": {"ok": True}}),
+    ])
+
+    def fake_post(*args, **kwargs):
+        seen_proxies.append(dict(MarketplaceScraper.SCRAPER_SESSION.proxies))
+        return next(responses)
+
+    monkeypatch.setattr(MarketplaceScraper.SCRAPER_SESSION, "post", fake_post)
+    monkeypatch.setattr(MarketplaceScraper.time, "sleep", lambda *_args, **_kwargs: None)
+
+    status, error, response = MarketplaceScraper.getFacebookResponse({"doc_id": "1"})
+
+    assert status == "Success"
+    assert error == {}
+    assert response is not None
+    assert response.status_code == 200
+    assert seen_proxies == [first, second]

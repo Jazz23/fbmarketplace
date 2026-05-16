@@ -22,6 +22,8 @@ GRAPHQL_HEADERS = {
     "Sec-Fetch-User": "?1",
 }
 GRAPHQL_TIMEOUT = (3.05, 30)
+RATE_LIMIT_MAX_RETRIES = 3
+RATE_LIMIT_BACKOFF_BASE_SECONDS = 0.5
 
 SCRAPER_SESSION = requests.Session()
 SCRAPER_SESSION.headers.update(GRAPHQL_HEADERS)
@@ -157,6 +159,34 @@ def _current_proxy_info() -> dict[str, str]:
         pass
 
     return {"proxy": proxy}
+
+
+def _is_rate_limited(response: requests.Response | None = None, error_message: str = "") -> bool:
+    if response is not None and response.status_code == 429:
+        return True
+
+    normalized_message = error_message.strip().lower()
+    if not normalized_message:
+        return False
+
+    return any(
+        marker in normalized_message
+        for marker in (
+            "rate limit",
+            "rate limited",
+            "too many requests",
+            "try again later",
+            "temporarily blocked",
+        )
+    )
+
+
+def _rate_limit_backoff_seconds(attempt: int) -> float:
+    return RATE_LIMIT_BACKOFF_BASE_SECONDS * (2 ** attempt)
+
+
+def _sleep_before_retry(attempt: int) -> None:
+    time.sleep(_rate_limit_backoff_seconds(attempt))
 
 def update_session_proxy(proxies: dict[str, str] | list[dict[str, str]] | list[str] | str | None):
     if proxies is None:
@@ -482,26 +512,46 @@ def getListingImages(listingID):
         return ("Failure", {"source": "Parsing", "message": str(e)}, [])
 
 def getFacebookResponse(requestPayload):
-    try:
-        _apply_next_proxy()
+    attempts = RATE_LIMIT_MAX_RETRIES + 1
 
-        facebookResponse = SCRAPER_SESSION.post(
-            GRAPHQL_URL,
-            data=requestPayload,
-            timeout=GRAPHQL_TIMEOUT,
-        )
-
+    for attempt in range(attempts):
         try:
-            res_json = facebookResponse.json()
-            if res_json.get("errors"):
-                error_msg = res_json["errors"][0].get("message", "Unknown API Error")
-                return ("Failure", {"source": "Facebook", "message": error_msg}, facebookResponse)
-        except Exception:
-            pass
+            _apply_next_proxy()
 
-        return ("Success", {}, facebookResponse)
-    except Exception as e:
-        return ("Failure", {"source": "Request", "message": str(e)}, None)
+            facebookResponse = SCRAPER_SESSION.post(
+                GRAPHQL_URL,
+                data=requestPayload,
+                timeout=GRAPHQL_TIMEOUT,
+            )
+
+            if _is_rate_limited(response=facebookResponse):
+                error = {"source": "Facebook", "message": f"Rate limited with status {facebookResponse.status_code}"}
+                if attempt < RATE_LIMIT_MAX_RETRIES:
+                    _sleep_before_retry(attempt)
+                    continue
+                return ("Failure", error, facebookResponse)
+
+            try:
+                res_json = facebookResponse.json()
+                if res_json.get("errors"):
+                    error_msg = res_json["errors"][0].get("message", "Unknown API Error")
+                    error = {"source": "Facebook", "message": error_msg}
+                    if _is_rate_limited(response=facebookResponse, error_message=error_msg) and attempt < RATE_LIMIT_MAX_RETRIES:
+                        _sleep_before_retry(attempt)
+                        continue
+                    return ("Failure", error, facebookResponse)
+            except Exception:
+                pass
+
+            return ("Success", {}, facebookResponse)
+        except Exception as e:
+            error = {"source": "Request", "message": str(e)}
+            if _is_rate_limited(error_message=str(e)) and attempt < RATE_LIMIT_MAX_RETRIES:
+                _sleep_before_retry(attempt)
+                continue
+            return ("Failure", error, None)
+
+    return ("Failure", {"source": "Facebook", "message": "Rate limited after retries."}, None)
 
 def parsePageResults(rawPageResults):
     listingPages = []
